@@ -1,3 +1,5 @@
+Current state of development: Barely working proof of concept
+
 # Create Railway Toolkit
 
 A Minecraft NeoForge addon for the Create mod that displays track curvature radius and slope information while placing railway tracks.
