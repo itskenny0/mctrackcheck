@@ -1,0 +1,135 @@
+plugins {
+    id 'java'
+    id 'idea'
+    id 'eclipse'
+    id 'maven-publish'
+    id 'net.neoforged.moddev' version '2.0.107'
+}
+
+version = mod_version
+group = 'com.railwaytoolkit'
+
+base {
+    archivesName = "${mod_id}-${minecraft_version}"
+}
+
+java.toolchain.languageVersion = JavaLanguageVersion.of(21)
+
+println("Java: ${System.getProperty('java.version')}, JVM: ${System.getProperty('java.vm.version')} (${System.getProperty('java.vendor')}), Arch: ${System.getProperty('os.arch')}")
+
+neoForge {
+    version = neo_version
+
+    parchment {
+        minecraftVersion = parchment_minecraft_version
+        mappingsVersion = parchment_version
+    }
+
+    mods {
+        "${mod_id}" {
+            sourceSet(sourceSets.main)
+        }
+    }
+
+    runs {
+        configureEach {
+            systemProperty 'forge.logging.markers', 'REGISTRIES'
+            systemProperty 'mixin.debug.verbose', 'true'
+            systemProperty 'mixin.debug.export', 'true'
+            jvmArgument '-XX:+IgnoreUnrecognizedVMOptions'
+            jvmArgument '-XX:+AllowEnhancedClassRedefinition'
+        }
+
+        client {
+            client()
+        }
+
+        server {
+            server()
+            gameDirectory = project.file('run/server')
+            programArgument '--nogui'
+        }
+
+        data {
+            data()
+            programArguments.addAll '--mod', mod_id, '--all',
+                    '--output', file('src/generated/resources/').absolutePath,
+                    '--existing', file('src/main/resources/').absolutePath
+        }
+    }
+}
+
+repositories {
+    mavenCentral()
+    maven { url = 'https://maven.createmod.net' }
+    maven { url = 'https://maven.ithundxr.dev/snapshots' }
+    maven { url = 'https://maven.blamejared.com' }
+    maven { url = 'https://api.modrinth.com/maven' }
+    maven { url = 'https://www.cursemaven.com' }
+}
+
+dependencies {
+    // Create mod dependency (using slim jar for compile-only)
+    compileOnly("com.simibubi.create:create-${minecraft_version}:${create_version}-251:slim") {
+        transitive = false
+    }
+
+    // Registrate (required by Create)
+    compileOnly("com.tterrag.registrate:Registrate:MC1.21-1.3.0+67")
+
+    // Flywheel (required by Create)
+    compileOnly("dev.engine-room.flywheel:flywheel-neoforge-api-${minecraft_version}:1.0.6")
+
+    // Catnip (Create's utility library) - note: capital C in artifact name
+    compileOnly("net.createmod.catnip:Catnip-NeoForge-${minecraft_version}:0.8.54")
+
+    // Ponder (Create's tutorial system)
+    compileOnly("net.createmod.ponder:ponder-neoforge:1.0.81+mc${minecraft_version}")
+}
+
+var generateModMetadata = tasks.register('generateModMetadata', ProcessResources) {
+    var replaceProperties = [
+            mod_version      : mod_version,
+            mod_id           : mod_id,
+            mod_name         : mod_name,
+            mod_author       : mod_author,
+            mod_description  : mod_description,
+            mod_license      : mod_license,
+            neo_version      : neo_version,
+            minecraft_version: minecraft_version,
+            create_version   : create_version,
+    ]
+    inputs.properties replaceProperties
+    expand replaceProperties
+    from 'src/main/templates'
+    into 'build/generated/sources/modMetadata'
+}
+
+sourceSets.main.resources.srcDir generateModMetadata
+neoForge.ideSyncTask generateModMetadata
+
+jar {
+    manifest.attributes([
+            'MixinConfigs': 'railwaytoolkit.mixins.json'
+    ])
+    from('LICENSE') {
+        rename { "${it}_${base.archivesName.get()}" }
+    }
+}
+
+publishing {
+    publications {
+        register('mavenJava', MavenPublication) {
+            from components.java
+        }
+    }
+    repositories {
+        maven {
+            url = layout.buildDirectory.dir('repo')
+        }
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}

@@ -1,0 +1,6 @@
+{
+  "config.railwaytoolkit.title": "Create Railway Toolkit Configuration",
+  "config.railwaytoolkit.display": "Display Settings",
+  "config.railwaytoolkit.thresholds": "Curvature Thresholds",
+  "config.railwaytoolkit.enforcement": "Enforcement Settings"
+}

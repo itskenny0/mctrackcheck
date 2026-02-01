@@ -1,0 +1,40 @@
+# Gradle
+.gradle/
+build/
+out/
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.project
+.classpath
+.settings/
+*.launch
+.metadata/
+bin/
+*.log
+
+# Eclipse
+eclipse/
+
+# NeoForge
+run/
+runs/
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# Generated sources
+src/generated/
+
+# Local config
+local.properties
+
+# Secrets
+*.env

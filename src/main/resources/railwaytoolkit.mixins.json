@@ -1,0 +1,17 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "com.railwaytoolkit.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "refmap": "railwaytoolkit.refmap.json",
+  "mixins": [
+  ],
+  "client": [
+    "TrackPlacementMixin",
+    "TrackPlacementEnforcementMixin",
+    "accessor.PlacementInfoAccessor"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
