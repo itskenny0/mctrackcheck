@@ -5,6 +5,7 @@ import com.railwaytoolkit.config.RailwayToolkitConfig.CurvatureRating;
 import com.railwaytoolkit.mixin.accessor.PlacementInfoAccessor;
 import com.simibubi.create.content.trains.track.BezierConnection;
 import com.simibubi.create.content.trains.track.TrackPlacement;
+import net.createmod.catnip.data.Couple;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
@@ -19,13 +20,11 @@ import org.lwjgl.glfw.GLFW;
  */
 public class CurvatureDisplay {
 
-    private static long lastDisplayTime = 0;
-    private static final long DISPLAY_COOLDOWN_MS = 50; // Prevent flickering
-
     /**
-     * Called from the mixin after Create's clientTick processes track placement.
+     * Called from the mixin at the end of clientTick to display our curvature info.
+     * This overwrites Create's message but includes all relevant information.
      */
-    public static void onTrackPlacementTick() {
+    public static void displayCurvatureInfo() {
         Minecraft mc = Minecraft.getInstance();
         LocalPlayer player = mc.player;
 
@@ -33,41 +32,177 @@ public class CurvatureDisplay {
             return;
         }
 
-        // Check if we're in track placement mode by accessing Create's cached placement info
+        TrackPlacement.PlacementInfo info = TrackPlacement.cached;
+        if (info == null) {
+            return;
+        }
+
+        PlacementInfoAccessor accessor = (PlacementInfoAccessor) (Object) info;
+        BezierConnection curve = accessor.getCurve();
+
+        double radius = curve != null ? calculateMinimumRadius(curve) : 0;
+        double slope = calculateSlope(accessor);
+
+        boolean enforcing = isEnforcementKeyHeld();
+        double enforcementRadius = EnforcementHandler.getCurrentMinRadius();
+
+        MutableComponent curvatureInfo = buildCurvatureInfo(radius, slope, enforcing, enforcementRadius);
+
+        if (curvatureInfo != null) {
+            // Build combined message with Create's status
+            MutableComponent combined = Component.empty();
+
+            // Add Create's status first
+            if (accessor.isValid()) {
+                combined.append(Component.literal("Can Connect").withStyle(ChatFormatting.GREEN));
+            } else {
+                String msg = accessor.getMessage();
+                if (msg != null && !msg.equals("track.second_point")) {
+                    combined.append(Component.literal("Invalid").withStyle(ChatFormatting.RED));
+                } else {
+                    combined.append(Component.literal("Select End").withStyle(ChatFormatting.WHITE));
+                }
+            }
+
+            combined.append(Component.literal(" | ").withStyle(ChatFormatting.DARK_GRAY));
+            combined.append(curvatureInfo);
+
+            player.displayClientMessage(combined, true);
+        }
+    }
+
+    /**
+     * Called from the mixin to append our curvature info to Create's message.
+     * @deprecated Use displayCurvatureInfo() instead
+     */
+    @Deprecated
+    public static Component appendCurvatureInfo(Component createMessage) {
         TrackPlacement.PlacementInfo info = TrackPlacement.cached;
 
         if (info == null) {
-            return;
+            return createMessage;
         }
 
         // Cast to accessor to access package-private fields
         PlacementInfoAccessor accessor = (PlacementInfoAccessor) (Object) info;
 
-        // Only display if there's a valid curve being placed
+        // Get curve - may be null for straight tracks
         BezierConnection curve = accessor.getCurve();
-        if (curve == null) {
-            return;
-        }
 
-        // Get curve properties
-        double radius = curve.getRadius();
+        // Get curve properties - use our calculation for minimum radius
+        double radius = curve != null ? calculateMinimumRadius(curve) : 0;
         double slope = calculateSlope(accessor);
 
-        // Check for enforcement mode (Ctrl+Alt held)
+        // Check for enforcement mode (Alt held)
         boolean enforcing = isEnforcementKeyHeld();
-        double enforcementRadius = RailwayToolkitConfig.getEnforcementMinRadius();
+        double enforcementRadius = EnforcementHandler.getCurrentMinRadius();
 
-        // Build display message
-        MutableComponent message = buildDisplayMessage(radius, slope, enforcing, enforcementRadius);
+        // Build our curvature info
+        MutableComponent curvatureInfo = buildCurvatureInfo(radius, slope, enforcing, enforcementRadius);
 
-        if (message != null) {
-            // Throttle display updates
-            long now = System.currentTimeMillis();
-            if (now - lastDisplayTime > DISPLAY_COOLDOWN_MS) {
-                player.displayClientMessage(message, true);
-                lastDisplayTime = now;
+        if (curvatureInfo == null) {
+            return createMessage;
+        }
+
+        // Combine Create's message with our info
+        MutableComponent combined = Component.empty();
+        combined.append(createMessage);
+        combined.append(Component.literal(" | ").withStyle(ChatFormatting.DARK_GRAY));
+        combined.append(curvatureInfo);
+
+        return combined;
+    }
+
+    /**
+     * Calculate the minimum curvature radius of a Bezier curve.
+     * This works for both regular curves and S-curves.
+     *
+     * For a cubic Bezier curve B(t), the curvature at t is:
+     * κ(t) = |B'(t) × B''(t)| / |B'(t)|³
+     *
+     * The radius at t is R(t) = 1 / κ(t)
+     */
+    private static double calculateMinimumRadius(BezierConnection curve) {
+        // First try Create's built-in radius (works for simple curves)
+        double createRadius = curve.getRadius();
+        if (createRadius > 0) {
+            return createRadius;
+        }
+
+        // For S-curves and other cases, calculate from the Bezier curve
+        Couple<Vec3> starts = curve.starts;
+        Couple<Vec3> axes = curve.axes;
+
+        Vec3 p0 = starts.getFirst();
+        Vec3 p3 = starts.getSecond();
+
+        double handleLength = curve.getHandleLength();
+        Vec3 p1 = p0.add(axes.getFirst().normalize().scale(handleLength));
+        Vec3 p2 = p3.add(axes.getSecond().normalize().scale(handleLength));
+
+        // Sample the curve to find minimum radius
+        double minRadius = Double.MAX_VALUE;
+        int samples = 20;
+
+        for (int i = 1; i < samples; i++) {
+            double t = i / (double) samples;
+            double radius = calculateRadiusAt(p0, p1, p2, p3, t);
+            if (radius > 0 && radius < minRadius) {
+                minRadius = radius;
             }
         }
+
+        return minRadius == Double.MAX_VALUE ? 0 : minRadius;
+    }
+
+    /**
+     * Calculate the curvature radius at a specific point on a cubic Bezier curve.
+     */
+    private static double calculateRadiusAt(Vec3 p0, Vec3 p1, Vec3 p2, Vec3 p3, double t) {
+        // First derivative B'(t)
+        Vec3 d1 = bezierDerivative(p0, p1, p2, p3, t);
+
+        // Second derivative B''(t)
+        Vec3 d2 = bezierSecondDerivative(p0, p1, p2, p3, t);
+
+        // Curvature κ = |d1 × d2| / |d1|³
+        Vec3 cross = d1.cross(d2);
+        double crossMag = cross.length();
+        double d1Mag = d1.length();
+
+        if (d1Mag < 0.0001) {
+            return 0;
+        }
+
+        double curvature = crossMag / (d1Mag * d1Mag * d1Mag);
+
+        if (curvature < 0.0001) {
+            return 0; // Essentially straight
+        }
+
+        return 1.0 / curvature;
+    }
+
+    /**
+     * First derivative of a cubic Bezier curve at parameter t.
+     */
+    private static Vec3 bezierDerivative(Vec3 p0, Vec3 p1, Vec3 p2, Vec3 p3, double t) {
+        double mt = 1 - t;
+        // B'(t) = 3(1-t)²(P1-P0) + 6(1-t)t(P2-P1) + 3t²(P3-P2)
+        return p1.subtract(p0).scale(3 * mt * mt)
+                .add(p2.subtract(p1).scale(6 * mt * t))
+                .add(p3.subtract(p2).scale(3 * t * t));
+    }
+
+    /**
+     * Second derivative of a cubic Bezier curve at parameter t.
+     */
+    private static Vec3 bezierSecondDerivative(Vec3 p0, Vec3 p1, Vec3 p2, Vec3 p3, double t) {
+        double mt = 1 - t;
+        // B''(t) = 6(1-t)(P2-2P1+P0) + 6t(P3-2P2+P1)
+        Vec3 term1 = p2.subtract(p1.scale(2)).add(p0);
+        Vec3 term2 = p3.subtract(p2.scale(2)).add(p1);
+        return term1.scale(6 * mt).add(term2.scale(6 * t));
     }
 
     /**
@@ -96,7 +231,7 @@ public class CurvatureDisplay {
     }
 
     /**
-     * Check if the enforcement modifier keys are being held (Ctrl+Alt).
+     * Check if the enforcement modifier key is being held (Alt only).
      */
     public static boolean isEnforcementKeyHeld() {
         if (!RailwayToolkitConfig.CLIENT.enableEnforcement.get()) {
@@ -104,19 +239,17 @@ public class CurvatureDisplay {
         }
 
         long window = Minecraft.getInstance().getWindow().getWindow();
-        boolean ctrlHeld = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_LEFT_CONTROL) == GLFW.GLFW_PRESS ||
-                          GLFW.glfwGetKey(window, GLFW.GLFW_KEY_RIGHT_CONTROL) == GLFW.GLFW_PRESS;
         boolean altHeld = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_LEFT_ALT) == GLFW.GLFW_PRESS ||
                          GLFW.glfwGetKey(window, GLFW.GLFW_KEY_RIGHT_ALT) == GLFW.GLFW_PRESS;
 
-        return ctrlHeld && altHeld;
+        return altHeld;
     }
 
     /**
-     * Build the display message showing curvature information.
+     * Build the curvature info portion of the display message.
      */
-    private static MutableComponent buildDisplayMessage(double radius, double slope,
-                                                         boolean enforcing, double enforcementRadius) {
+    private static MutableComponent buildCurvatureInfo(double radius, double slope,
+                                                        boolean enforcing, double enforcementRadius) {
         RailwayToolkitConfig.ClientConfig config = RailwayToolkitConfig.CLIENT;
 
         MutableComponent message = Component.empty();
@@ -139,7 +272,7 @@ public class CurvatureDisplay {
             CurvatureRating rating = RailwayToolkitConfig.getRating(radius);
 
             if (hasContent) {
-                message.append(Component.literal(" | ").withStyle(ChatFormatting.GRAY));
+                message.append(Component.literal(" ").withStyle(ChatFormatting.GRAY));
             }
 
             ChatFormatting ratingColor = switch (rating) {
@@ -149,7 +282,7 @@ public class CurvatureDisplay {
                 case INVALID -> ChatFormatting.RED;
             };
 
-            message.append(Component.literal(rating.getDisplayName()).withStyle(ratingColor));
+            message.append(Component.literal("[" + rating.getDisplayName() + "]").withStyle(ratingColor));
             hasContent = true;
         }
 
@@ -159,7 +292,7 @@ public class CurvatureDisplay {
                 message.append(Component.literal(" | ").withStyle(ChatFormatting.GRAY));
             }
 
-            String slopeText = String.format("Grade: %.1f%%", slope);
+            String slopeText = String.format("%.1f%%", slope);
             ChatFormatting slopeColor = Math.abs(slope) > 10 ? ChatFormatting.RED :
                                         Math.abs(slope) > 5 ? ChatFormatting.YELLOW :
                                         ChatFormatting.GREEN;
@@ -167,20 +300,24 @@ public class CurvatureDisplay {
             hasContent = true;
         }
 
-        // Show enforcement status
+        // Show enforcement status when Alt is held
         if (enforcing) {
             if (hasContent) {
-                message.append(Component.literal(" | ").withStyle(ChatFormatting.GRAY));
+                message.append(Component.literal(" ").withStyle(ChatFormatting.GRAY));
             }
 
-            boolean meetsRequirement = radius >= enforcementRadius;
-            String enfLevel = config.enforcementLevel.get();
-            String enfText = meetsRequirement ?
-                    String.format("[%s OK]", enfLevel) :
-                    String.format("[%s: Need R>=%.0f]", enfLevel, enforcementRadius);
-
-            ChatFormatting enfColor = meetsRequirement ? ChatFormatting.GREEN : ChatFormatting.RED;
-            message.append(Component.literal(enfText).withStyle(enfColor));
+            String enfLevel = EnforcementHandler.getCurrentLevelName();
+            if (radius > 0) {
+                boolean meetsRequirement = radius >= enforcementRadius;
+                String enfText = meetsRequirement ?
+                        String.format("[%s OK]", enfLevel) :
+                        String.format("[%s R>=%.0f]", enfLevel, enforcementRadius);
+                ChatFormatting enfColor = meetsRequirement ? ChatFormatting.GREEN : ChatFormatting.RED;
+                message.append(Component.literal(enfText).withStyle(enfColor));
+            } else {
+                // Straight track - always OK for enforcement, show scroll hint
+                message.append(Component.literal("[" + enfLevel + " - Scroll]").withStyle(ChatFormatting.AQUA));
+            }
             hasContent = true;
         }
 
@@ -189,14 +326,21 @@ public class CurvatureDisplay {
 
     /**
      * Check if current track placement should be blocked due to enforcement.
-     * This is called separately to potentially cancel placement.
+     * This is called separately to potentially modify placement behavior.
      */
     public static boolean shouldBlockPlacement(double radius) {
         if (!isEnforcementKeyHeld()) {
             return false;
         }
 
-        double enforcementRadius = RailwayToolkitConfig.getEnforcementMinRadius();
+        double enforcementRadius = EnforcementHandler.getCurrentMinRadius();
         return radius > 0 && radius < enforcementRadius;
+    }
+
+    /**
+     * Get the minimum radius for a curve, used by enforcement mixin.
+     */
+    public static double getMinimumRadius(BezierConnection curve) {
+        return curve != null ? calculateMinimumRadius(curve) : 0;
     }
 }

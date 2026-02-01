@@ -1,6 +1,7 @@
 package com.railwaytoolkit.mixin;
 
 import com.railwaytoolkit.client.CurvatureDisplay;
+import com.railwaytoolkit.client.MaxRadiusHighlight;
 import com.simibubi.create.content.trains.track.TrackPlacement;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
@@ -15,11 +16,16 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public class TrackPlacementMixin {
 
     /**
-     * Inject at the end of clientTick to display our curvature info
-     * after Create has finished its processing.
+     * Inject at the end of clientTick to update our displays.
+     * We use a different approach now - instead of redirecting the message,
+     * we'll let Create display its message and then immediately display ours after.
      */
     @Inject(method = "clientTick", at = @At("TAIL"))
-    private static void onClientTick(CallbackInfo ci) {
-        CurvatureDisplay.onTrackPlacementTick();
+    private static void onClientTickEnd(CallbackInfo ci) {
+        // Update curvature display (this will overwrite Create's message with combined info)
+        CurvatureDisplay.displayCurvatureInfo();
+
+        // Update max radius highlight
+        MaxRadiusHighlight.updateHighlight();
     }
 }

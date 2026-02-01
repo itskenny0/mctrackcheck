@@ -62,8 +62,8 @@ public class RailwayToolkitConfig {
 
             mainlineMinRadius = builder
                     .comment("Minimum radius for mainline-suitable curves (in blocks)",
-                            "Typical real-world mainline curves translate to about 90+ blocks")
-                    .defineInRange("mainlineMinRadius", 90.0, 1.0, 1000.0);
+                            "Recommended minimum for mainline operations is 60+ blocks")
+                    .defineInRange("mainlineMinRadius", 60.0, 1.0, 1000.0);
 
             yardMinRadius = builder
                     .comment("Minimum radius for yard-suitable curves (in blocks)",
@@ -78,15 +78,15 @@ public class RailwayToolkitConfig {
             builder.pop();
 
             builder.comment("Enforcement Settings",
-                           "When enabled and Ctrl+Alt is held, enforce minimum curvature limits")
+                           "When enabled and Alt is held, enforce minimum curvature limits")
                    .push("enforcement");
 
             enableEnforcement = builder
-                    .comment("Enable the Ctrl+Alt enforcement modifier")
+                    .comment("Enable the Alt key enforcement modifier")
                     .define("enableEnforcement", true);
 
             enforcementLevel = builder
-                    .comment("Which limit to enforce when Ctrl+Alt is held",
+                    .comment("Which limit to enforce when Alt is held",
                             "Valid values: MAINLINE, YARD, ABSOLUTE")
                     .define("enforcementLevel", "MAINLINE");
 

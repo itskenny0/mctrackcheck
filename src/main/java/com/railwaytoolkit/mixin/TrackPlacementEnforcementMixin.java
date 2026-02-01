@@ -15,7 +15,7 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
- * Mixin to enforce curvature limits when Ctrl+Alt is held.
+ * Mixin to enforce curvature limits when Alt is held.
  */
 @Mixin(value = TrackPlacement.class, remap = false)
 public class TrackPlacementEnforcementMixin {
@@ -45,8 +45,8 @@ public class TrackPlacementEnforcementMixin {
             return;
         }
 
-        // Check if enforcement would block this placement
-        double radius = curve.getRadius();
+        // Check if enforcement would block this placement (use our radius calculation for S-curves)
+        double radius = CurvatureDisplay.getMinimumRadius(curve);
         if (CurvatureDisplay.shouldBlockPlacement(radius)) {
             // Mark the placement as invalid
             accessor.setValid(false);
